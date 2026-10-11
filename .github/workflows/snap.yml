@@ -1,0 +1,50 @@
+name: snapshots
+
+# 只有排程與手動觸發；不接 push / pull_request，外人開 PR 不會執行任何東西。
+on:
+  schedule:
+    - cron: '*/15 23,0-14 * * *'   # 台灣時間 07:00–22:59 每 15 分（GitHub 排程常延遲數分鐘）
+    - cron: '0 15-22 * * *'        # 台灣時間 23:00–06:00 每小時
+  workflow_dispatch:
+
+# 預設不給任何權限，各 job 只拿自己需要的
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # 解析遠端 JSON 的 job 只有讀權限；就算解析過程被利用，也拿不到發布權限
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # 第三方 action 一律固定 commit SHA（tag 可被移動）；upload-pages-artifact 內部的 upload-artifact 也已固定 SHA
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build signed snapshots
+        run: node build-snapshots.mjs
+        env:
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: out
+
+  # 發布 job 不執行任何本 repo 的程式碼，只跑官方 deploy-pages
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
